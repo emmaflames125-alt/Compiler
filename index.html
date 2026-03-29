@@ -428,57 +428,40 @@ function clearEditor() {
   document.getElementById('rmkResult').classList.add('hidden');
 }
 
-// ====================== PWA + OFFLINE SETUP ======================
+// ====================== PWA + OFFLINE SETUP (VPN-friendly) ======================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js')
-      .then(reg => console.log('✅ SW registered'))
-      .catch(err => console.warn('SW failed', err));
+      .then(reg => console.log('✅ Service Worker registered'))
+      .catch(err => console.warn('SW registration failed:', err));
   });
 }
 
-// Show loading screen until everything is ready
+// DOM elements
 const setupScreen = document.getElementById('setupScreen');
 const statusText = document.getElementById('statusText');
 const offlineError = document.getElementById('offlineError');
 
-async function initializeApp() {
+function initializeApp() {
   if (!navigator.onLine) {
     showOfflineError();
     return;
   }
 
+  // Show friendly setup message
   statusText.innerHTML = `
     <div class="animate-spin w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full inline-block mr-3"></div>
     Setting up… (one-time internet required)
   `;
 
-  try {
-    // SLOW + normal fetch to Tailwind CDN (what your app actually needs)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8-second timeout
-
-    await fetch('https://cdn.tailwindcss.com', { 
-      signal: controller.signal,
-      cache: 'no-store'
-    });
-
-    clearTimeout(timeoutId);
-
-    // Give service worker extra time to finish caching Tailwind + Font Awesome
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    // Success → hide setup screen
-    setupScreen.style.transition = 'opacity 0.5s ease';
+  // Fixed delay — gives SW time to cache Tailwind + Font Awesome
+  setTimeout(() => {
+    setupScreen.style.transition = 'opacity 0.6s ease';
     setupScreen.style.opacity = '0';
     setTimeout(() => {
       setupScreen.style.display = 'none';
-    }, 600);
-
-  } catch (err) {
-    console.log("Setup fetch failed (VPN or slow connection)", err);
-    showOfflineError();
-  }
+    }, 700);
+  }, 2500);   // 2.5 seconds — enough for most connections
 }
 
 function showOfflineError() {
@@ -486,7 +469,7 @@ function showOfflineError() {
   offlineError.classList.remove('hidden');
 }
 
-// Start the app
+// Start
 initializeApp();
   
 // Tailwind script already loaded via CDN
