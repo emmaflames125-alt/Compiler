@@ -27,6 +27,36 @@
   </style>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen">
+  <!-- LOADING / OFFLINE SCREEN -->
+  <div id="setupScreen" class="fixed inset-0 bg-zinc-950 flex items-center justify-center z-50">
+  <div class="text-center max-w-md px-6">
+    <!-- Logo + Title -->
+    <div class="flex justify-center mb-6">
+      <i class="fas fa-microchip text-7xl text-indigo-400"></i>
+    </div>
+    <h1 class="text-4xl font-bold text-indigo-400 mb-2">Fxesplus ROP Compiler</h1>
+    <p class="text-zinc-400 mb-8">Compiler + RMK Hackstring Generator</p>
+
+    <!-- Status -->
+    <div id="statusText" class="text-emerald-400 font-medium flex items-center justify-center gap-3">
+      <div class="animate-spin w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full"></div>
+      Setting up… (requires internet for first launch)
+    </div>
+
+    <!-- Offline Error -->
+    <div id="offlineError" class="hidden mt-8">
+      <div class="bg-red-950 border border-red-500 text-red-300 rounded-3xl p-6">
+        <i class="fas fa-wifi-slash text-4xl mb-4 block"></i>
+        <p class="font-medium">No internet connection</p>
+        <p class="text-sm text-red-400 mt-2">This app needs internet the very first time to download icons and styles.</p>
+        <button onclick="location.reload()" 
+                class="mt-6 w-full bg-red-600 hover:bg-red-700 py-4 rounded-2xl font-semibold">
+          🔄 Try Again
+        </button>
+      </div>
+    </div>
+  </div>
+  </div>
 
 <div class="max-w-7xl mx-auto p-6">
   <div class="flex justify-between items-center mb-10">
@@ -398,10 +428,52 @@ function clearEditor() {
   document.getElementById('rmkResult').classList.add('hidden');
 }
 
-// PWA Support
+// ====================== PWA + OFFLINE SETUP ======================
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('data:application/javascript,').catch(() => {});
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('✅ SW registered'))
+      .catch(err => console.warn('SW failed', err));
+  });
 }
+
+// Show loading screen until everything is ready
+const setupScreen = document.getElementById('setupScreen');
+const statusText = document.getElementById('statusText');
+const offlineError = document.getElementById('offlineError');
+
+async function initializeApp() {
+  // First check if we are online
+  if (!navigator.onLine) {
+    showOfflineError();
+    return;
+  }
+
+  try {
+    // Small test fetch to confirm real connectivity
+    await fetch('https://cdn.tailwindcss.com', { method: 'HEAD', cache: 'no-store' });
+    
+    // Give the service worker a moment to finish caching
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
+    // Hide setup screen and show the real app
+    setupScreen.style.opacity = '0';
+    setTimeout(() => {
+      setupScreen.style.display = 'none';
+    }, 400);
+    
+  } catch (e) {
+    showOfflineError();
+  }
+}
+
+function showOfflineError() {
+  statusText.classList.add('hidden');
+  offlineError.classList.remove('hidden');
+}
+
+// Start everything
+initializeApp();
 
 // Tailwind script already loaded via CDN
 </script>
