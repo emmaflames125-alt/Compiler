@@ -443,26 +443,40 @@ const statusText = document.getElementById('statusText');
 const offlineError = document.getElementById('offlineError');
 
 async function initializeApp() {
-  // First check if we are online
   if (!navigator.onLine) {
     showOfflineError();
     return;
   }
 
+  statusText.innerHTML = `
+    <div class="animate-spin w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full inline-block mr-3"></div>
+    Setting up… (one-time internet required)
+  `;
+
   try {
-    // Small test fetch to confirm real connectivity
-    await fetch('https://cdn.tailwindcss.com', { method: 'HEAD', cache: 'no-store' });
-    
-    // Give the service worker a moment to finish caching
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    // Hide setup screen and show the real app
+    // SLOW + normal fetch to Tailwind CDN (what your app actually needs)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8-second timeout
+
+    await fetch('https://cdn.tailwindcss.com', { 
+      signal: controller.signal,
+      cache: 'no-store'
+    });
+
+    clearTimeout(timeoutId);
+
+    // Give service worker extra time to finish caching Tailwind + Font Awesome
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Success → hide setup screen
+    setupScreen.style.transition = 'opacity 0.5s ease';
     setupScreen.style.opacity = '0';
     setTimeout(() => {
       setupScreen.style.display = 'none';
-    }, 400);
-    
-  } catch (e) {
+    }, 600);
+
+  } catch (err) {
+    console.log("Setup fetch failed (VPN or slow connection)", err);
     showOfflineError();
   }
 }
@@ -472,9 +486,9 @@ function showOfflineError() {
   offlineError.classList.remove('hidden');
 }
 
-// Start everything
+// Start the app
 initializeApp();
-
+  
 // Tailwind script already loaded via CDN
 </script>
 </body>
