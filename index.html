@@ -303,11 +303,105 @@ function processROP(lines) {
     if (lower.includes("pop ")) {
       if (line in dict) {
         instrToken = dict[line];
+// ====================== HELPER FUNCTIONS ======================
+function resolveAdrOf(text, labels) {
+  return text.replace(/adr_of\[(-?\d+)\](\w+)/g, (_, off, lbl) => {
+    if (!(lbl in labels)) throw new Error(`Unknown label ${lbl}`);
+    return `0x${(labels[lbl] + parseInt(off)).toString(16).padStart(4,'0')}`;
+  }).replace(/adr_of (\w+)/g, (_, lbl) => {
+    if (!(lbl in labels)) throw new Error(`Unknown label ${lbl}`);
+    return `0x${labels[lbl].toString(16).padStart(4,'0')}`;
+  });
+}
+
+function decodeData(expr, labels, expected) {
+  const parts = expr.split(',').map(p => p.trim());
+  let raw = [];
+  for (let p of parts) {
+    if (p.includes("adr_of")) p = resolveAdrOf(p, labels);
+    if (p.startsWith("0x")) p = p.slice(2);
+    if (p.length % 2) p = "0" + p;
+    for (let j = 0; j < p.length; j += 2) {
+      raw.push(p.slice(j, j + 2));
+    }
+  }
+  if (raw.length !== expected) throw new Error(`Expected ${expected} bytes, got ${raw.length}`);
+  return raw.map(b => charmap[b.toLowerCase()] || "");
+}
+
+// ====================== LABEL TABLE ======================
+function buildLabelTable(lines) {
+  let addr = 0;
+  let labels = {};
+  let i = 0;
+
+  while (i < lines.length) {
+    let raw = lines[i].trim();
+    if (!raw || raw.startsWith("#")) {
+      i++;
+      continue;
+    }
+
+    if (raw.endsWith(":")) {
+      labels[raw.slice(0, -1)] = addr;
+      i++;
+      continue;
+    }
+
+    let lower = raw.toLowerCase().replace(/\s/g, '');
+    let extraDataSize = 0;
+
+    if (lower.startsWith("pop_er")) extraDataSize = 2;
+    else if (lower.startsWith("pop_xr")) extraDataSize = 4;
+    else if (lower.startsWith("pop_qr")) extraDataSize = 8;
+
+    addr += 4;   // base size for every instruction
+
+    i++;
+    let nextRaw = (i < lines.length) ? lines[i].trim() : "";
+
+    if (nextRaw.endsWith(":")) {
+      labels[nextRaw.slice(0, -1)] = addr;
+      i++;
+      nextRaw = (i < lines.length) ? lines[i].trim() : "";
+      addr += extraDataSize;
+      i++;
+    } else if (extraDataSize > 0) {
+      addr += extraDataSize;
+      i++;
+    }
+  }
+  return labels;
+}
+
+// ====================== MAIN ROP PROCESSOR ======================
+function processROP(lines) {
+  const labels = buildLabelTable(lines);
+  let payload = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    let raw = lines[i].trim();
+    if (!raw || raw.startsWith("#") || raw.endsWith(":")) {
+      i++;
+      continue;
+    }
+
+    let line = raw;
+    let lower = line.toLowerCase();
+    let instrToken = null;
+    let dataExpected = 0;
+    let dataLine = null;
+
+    // Gadget ending with "pop reg" → lookup WHOLE line in dict
+    if (lower.includes("pop ")) {
+      if (line in dict) {
+        instrToken = dict[line];
       } else {
         throw new Error(`Unknown instruction: ${raw}`);
       }
 
-      // Detect final pop register to decide data size
+      // Detect final pop register for data size
       let popMatch = lower.match(/pop (er|xr|qr)(\d+)/);
       if (popMatch) {
         const regType = popMatch[1];
@@ -316,7 +410,7 @@ function processROP(lines) {
         else if (regType === "qr") dataExpected = 8;
       }
     }
-    // Single-line register assignment erN=, xrN=, qrN=
+    // Single-line register assignment: erN=, xrN=, qrN=
     else if (/^(er|xr|qr)\d+=/.test(line)) {
       const match = line.match(/^([exq]r)(\d+)=(.*)$/i);
       if (match) {
