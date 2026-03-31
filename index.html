@@ -613,34 +613,24 @@ function clearEditor() {
   document.getElementById('rmkResult').classList.add('hidden');
 }
 
-// ====================== PWA + OFFLINE SETUP (Simple & Reliable) ======================
+// ====================== SIMPLE PWA SETUP - FORCE SHOW APP ======================
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js')
-      .then(() => console.log('✅ Service Worker registered'))
-      .catch(err => console.warn('Service Worker failed:', err));
-  });
+  navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-// Force hide the setup screen after loading (prevents stuck loading)
-const setupScreen = document.getElementById('setupScreen');
-if (setupScreen) {
-  // Show "Setting up..." for 1.5 seconds then reveal the app
-  setTimeout(() => {
-    setupScreen.style.transition = 'opacity 0.6s ease-out';
-    setupScreen.style.opacity = '0';
-    
+// Force hide setup screen after 2 seconds (this should always work)
+window.addEventListener('load', () => {
+  const setupScreen = document.getElementById('setupScreen');
+  if (setupScreen) {
     setTimeout(() => {
-      setupScreen.style.display = 'none';
-      console.log('✅ App loaded successfully');
-    }, 700);
-  }, 1500);
-}
-
-function showOfflineError() {
-  statusText.classList.add('hidden');
-  offlineError.classList.remove('hidden');
-}
+      setupScreen.style.opacity = '0';
+      setTimeout(() => {
+        setupScreen.style.display = 'none';
+        console.log('App shown successfully');
+      }, 600);
+    }, 1800);
+  }
+});
 
 // Start
 initializeApp();
