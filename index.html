@@ -613,40 +613,28 @@ function clearEditor() {
   document.getElementById('rmkResult').classList.add('hidden');
 }
 
-// ====================== PWA + OFFLINE SETUP (VPN-friendly) ======================
+// ====================== PWA + OFFLINE SETUP (Simple & Reliable) ======================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js')
-      .then(reg => console.log('✅ Service Worker registered'))
-      .catch(err => console.warn('SW registration failed:', err));
+      .then(() => console.log('✅ Service Worker registered'))
+      .catch(err => console.warn('Service Worker failed:', err));
   });
 }
 
-// DOM elements
+// Force hide the setup screen after loading (prevents stuck loading)
 const setupScreen = document.getElementById('setupScreen');
-const statusText = document.getElementById('statusText');
-const offlineError = document.getElementById('offlineError');
-
-function initializeApp() {
-  if (!navigator.onLine) {
-    showOfflineError();
-    return;
-  }
-
-  // Show friendly setup message
-  statusText.innerHTML = `
-    <div class="animate-spin w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full inline-block mr-3"></div>
-    Setting up… (one-time internet required)
-  `;
-
-  // Fixed delay — gives SW time to cache Tailwind + Font Awesome
+if (setupScreen) {
+  // Show "Setting up..." for 1.5 seconds then reveal the app
   setTimeout(() => {
-    setupScreen.style.transition = 'opacity 0.6s ease';
+    setupScreen.style.transition = 'opacity 0.6s ease-out';
     setupScreen.style.opacity = '0';
+    
     setTimeout(() => {
       setupScreen.style.display = 'none';
+      console.log('✅ App loaded successfully');
     }, 700);
-  }, 2500);   // 2.5 seconds — enough for most connections
+  }, 1500);
 }
 
 function showOfflineError() {
