@@ -229,84 +229,137 @@ function hexToLEBytes(val) {
   return bytes.reverse();
 }
 
-function buildLabelTable(lines) {
-  let addr = 0, labels = {};
-  for (let l of lines) {
-    l = l.trim();
-    if (!l || l.startsWith("#")) continue;
-    if (l.startsWith("#org")) { addr = parseInt(l.split(/\s+/)[1], 16); continue; }
-    if (l.endsWith(":")) { labels[l.slice(0,-1)] = addr; continue; }
-    addr += 2;
-  }
-  return labels;
-}
-
-function resolveAdrOf(text, labels) {
-  return text.replace(/adr_of\[(-?\d+)\](\w+)/g, (_, off, lbl) => {
-    if (!(lbl in labels)) throw new Error(`Unknown label ${lbl}`);
-    return `0x${(labels[lbl] + parseInt(off)).toString(16).padStart(4,'0')}`;
-  });
-}
-
-function decodeData(expr, labels, expected) {
-  const parts = expr.split(',').map(p => p.trim());
-  let raw = [];
-  for (let p of parts) {
-    if (p.includes("adr_of[")) p = resolveAdrOf(p, labels);
-    raw.push(...hexToLEBytes(p));
-  }
-  if (raw.length !== expected) throw new Error(`Expected ${expected} bytes`);
-  return raw.map(b => charmap[b.toLowerCase()] || "");
-}
-
+// ====================== MAIN ROP PROCESSOR (Whole line lookup for gadgets ending with pop) ======================
 function processROP(lines) {
   const labels = buildLabelTable(lines);
   let payload = [];
   let i = 0;
+
   while (i < lines.length) {
     let raw = lines[i].trim();
-    if (!raw || raw.startsWith("#") || raw.endsWith(":")) { i++; continue; }
-    let line = resolveAdrOf(raw, labels);
+    if (!raw || raw.startsWith("#") || raw.endsWith(":")) {
+      i++;
+      continue;
+    }
 
-    if (line.endsWith("pop er8") || line.endsWith("pop er14") || line === "pop er8") {
-      payload.push(dict["pop_er8"] || dict[line]);
+    let line = raw;
+    let lower = line.toLowerCase();
+    let instrToken = null;
+    let dataExpected = 0;
+    let dataLine = null;
+
+    // === Gadget ending with "pop reg" - lookup WHOLE line in dict ===
+    if (lower.includes("pop ")) {
+      // Check if the entire line exists in dict
+      if (line in dict) {
+        instrToken = dict[line];
+      } else {
+        throw new Error(`Unknown instruction: ${raw}`);
+      }
+
+      // Detect which pop register is at the end to decide data size
+      let popMatch = lower.match(/pop (er|xr|qr)(\d+)/);
+      if (popMatch) {
+        const regType = popMatch[1];
+        if (regType === "er") dataExpected = 2;
+        else if (regType === "xr") dataExpected = 4;
+        else if (regType === "qr") dataExpected = 8;
+      }
+    }
+    // === Single-line register assignment: erN=, xrN=, qrN= ===
+    else if (/^(er|xr|qr)\d+=/.test(line)) {
+      const match = line.match(/^([exq]r)(\d+)=(.*)$/i);
+      if (match) {
+        const regType = match[1].toLowerCase();
+        const regNum = parseInt(match[2]);
+        const rightSide = match[3].trim();
+
+        let key = "";
+        if (regType === "er") {
+          key = `pop_er${regNum}`;
+          dataExpected = 2;
+        } else if (regType === "xr") {
+          key = `pop_xr${regNum}`;
+          dataExpected = 4;
+        } else if (regType === "qr") {
+          key = `pop_qr${regNum}`;
+          dataExpected = 8;
+        }
+
+        instrToken = dict[key];
+        if (!instrToken) throw new Error(`Unsupported register: \( {regType} \){regNum}`);
+
+        dataLine = rightSide;
+      }
+    }
+    // === Classic single pop_er / pop_xr / pop_qr ===
+    else if (lower.startsWith("pop_er")) {
+      const key = "pop_er" + lower.slice(6);
+      instrToken = dict[key];
+      dataExpected = 2;
+    } else if (lower.startsWith("pop_xr")) {
+      const key = "pop_xr" + lower.slice(6);
+      instrToken = dict[key];
+      dataExpected = 4;
+    } else if (lower.startsWith("pop_qr")) {
+      const key = "pop_qr" + lower.slice(6);
+      instrToken = dict[key];
+      dataExpected = 8;
+    } 
+    // === Normal instruction ===
+    else if (line in dict) {
+      instrToken = dict[line];
+    } 
+    else {
+      throw new Error(`Unknown instruction: ${raw}`);
+    }
+
+    if (!instrToken) {
+      throw new Error(`Missing dict entry for: ${line}`);
+    }
+
+    payload.push(instrToken);
+
+    // === Handle data if this command expects it ===
+    if (dataExpected > 0) {
+      if (dataLine) {
+        // Single-line assignment
+        dataLine = resolveAdrOf(dataLine, labels);
+      } else {
+        // Gadget or classic pop - read next line for data
+        i++;
+        let nextRaw = (i < lines.length) ? lines[i].trim() : "";
+
+        if (nextRaw.endsWith(":")) {
+          i++;
+          nextRaw = (i < lines.length) ? lines[i].trim() : "";
+        }
+
+        if (!nextRaw) {
+          throw new Error(`Missing data after ${line}`);
+        }
+
+        dataLine = nextRaw;
+        i++;
+      }
+
+      let resolvedData = resolveAdrOf(dataLine, labels);
+      payload.push(...decodeData(resolvedData, labels, dataExpected));
+    } 
+    else {
       i++;
-      if (i >= lines.length) throw new Error("Missing data after pop erN");
-      payload.push(...decodeData(resolveAdrOf(lines[i].trim(), labels), labels, 2));
-      i++; continue;
     }
-    if (line.endsWith("pop xr8") || line.endsWith("pop xr0")) {
-      payload.push(dict[line]);
-      i++;
-      if (i >= lines.length) throw new Error("Missing data after pop xrN");
-      payload.push(...decodeData(resolveAdrOf(lines[i].trim(), labels), labels, 4));
-      i++; continue;
-    }
-    if (/^xr\d+=.+,.+$/.test(line)) {
-      const reg = line.split("=")[0];
-      payload.push(dict[`pop_${reg}`]);
-      payload.push(...decodeData(line.split("=")[1], labels, 4));
-      i++; continue;
-    }
-    if (/^er\d+=.+$/.test(line) && !["er0=er8","er8=er0","er8=[er0]"].includes(line)) {
-      const reg = line.split("=")[0];
-      payload.push(dict[`pop_${reg}`]);
-      payload.push(...decodeData(line.split("=")[1], labels, 2));
-      i++; continue;
-    }
-    if (line in dict) {
-      payload.push(dict[line]);
-      i++; continue;
-    }
-    throw new Error(`Unknown instruction: ${raw}`);
   }
 
+  // Pad to 100 tokens
   const out = new Array(100).fill("");
-  for (let j = 0; j < payload.length && j < 100; j++) out[j] = payload[j];
+  for (let j = 0; j < payload.length && j < 100; j++) {
+    out[j] = payload[j];
+  }
+
   return { tokens: out, labels };
 }
-
-// ====================== RMK (Fixed) ======================
+  // ====================== RMK (Fixed) ======================
 function remakeHackstring(tokens) {
   let content = tokens.filter(t => t && t !== "" && t !== "00");
   const len = content.length;
