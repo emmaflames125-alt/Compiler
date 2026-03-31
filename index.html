@@ -229,6 +229,57 @@ function hexToLEBytes(val) {
   return bytes.reverse();
 }
 
+
+// ====================== LABEL TABLE (All instructions base +4 bytes) ======================
+function buildLabelTable(lines) {
+  let addr = 0;
+  let labels = {};
+  let i = 0;
+
+  while (i < lines.length) {
+    let raw = lines[i].trim();
+    if (!raw || raw.startsWith("#")) {
+      i++;
+      continue;
+    }
+
+    // Record label at current address
+    if (raw.endsWith(":")) {
+      labels[raw.slice(0, -1)] = addr;
+      i++;
+      continue;
+    }
+
+    // Determine extra data size for pop instructions
+    let lower = raw.toLowerCase().replace(/\s/g, '');
+    let extraDataSize = 0;
+
+    if (lower.startsWith("pop_er")) extraDataSize = 2;
+    else if (lower.startsWith("pop_xr")) extraDataSize = 4;
+    else if (lower.startsWith("pop_qr")) extraDataSize = 8;
+
+    // Base size for any instruction = 4 bytes
+    addr += 4;
+
+    // Check for label on data line
+    i++;
+    let nextRaw = (i < lines.length) ? lines[i].trim() : "";
+
+    if (nextRaw.endsWith(":")) {
+      labels[nextRaw.slice(0, -1)] = addr;
+      i++; // skip label
+      nextRaw = (i < lines.length) ? lines[i].trim() : "";
+      addr += extraDataSize;
+      i++; // skip data line
+    } else if (extraDataSize > 0) {
+      addr += extraDataSize;
+      i++; // skip data
+    }
+    // else normal instruction already advanced +4
+  }
+  return labels;
+}
+
 // ====================== MAIN ROP PROCESSOR (Whole line lookup for gadgets ending with pop) ======================
 function processROP(lines) {
   const labels = buildLabelTable(lines);
@@ -248,16 +299,15 @@ function processROP(lines) {
     let dataExpected = 0;
     let dataLine = null;
 
-    // === Gadget ending with "pop reg" - lookup WHOLE line in dict ===
+    // Gadget ending with "pop reg" → lookup WHOLE line in dict
     if (lower.includes("pop ")) {
-      // Check if the entire line exists in dict
       if (line in dict) {
         instrToken = dict[line];
       } else {
         throw new Error(`Unknown instruction: ${raw}`);
       }
 
-      // Detect which pop register is at the end to decide data size
+      // Detect final pop register to decide data size
       let popMatch = lower.match(/pop (er|xr|qr)(\d+)/);
       if (popMatch) {
         const regType = popMatch[1];
@@ -266,7 +316,7 @@ function processROP(lines) {
         else if (regType === "qr") dataExpected = 8;
       }
     }
-    // === Single-line register assignment: erN=, xrN=, qrN= ===
+    // Single-line register assignment erN=, xrN=, qrN=
     else if (/^(er|xr|qr)\d+=/.test(line)) {
       const match = line.match(/^([exq]r)(\d+)=(.*)$/i);
       if (match) {
@@ -275,16 +325,9 @@ function processROP(lines) {
         const rightSide = match[3].trim();
 
         let key = "";
-        if (regType === "er") {
-          key = `pop_er${regNum}`;
-          dataExpected = 2;
-        } else if (regType === "xr") {
-          key = `pop_xr${regNum}`;
-          dataExpected = 4;
-        } else if (regType === "qr") {
-          key = `pop_qr${regNum}`;
-          dataExpected = 8;
-        }
+        if (regType === "er") { key = `pop_er${regNum}`; dataExpected = 2; }
+        else if (regType === "xr") { key = `pop_xr${regNum}`; dataExpected = 4; }
+        else if (regType === "qr") { key = `pop_qr${regNum}`; dataExpected = 8; }
 
         instrToken = dict[key];
         if (!instrToken) throw new Error(`Unsupported register: \( {regType} \){regNum}`);
@@ -292,7 +335,7 @@ function processROP(lines) {
         dataLine = rightSide;
       }
     }
-    // === Classic single pop_er / pop_xr / pop_qr ===
+    // Classic single pop
     else if (lower.startsWith("pop_er")) {
       const key = "pop_er" + lower.slice(6);
       instrToken = dict[key];
@@ -306,7 +349,7 @@ function processROP(lines) {
       instrToken = dict[key];
       dataExpected = 8;
     } 
-    // === Normal instruction ===
+    // Normal instruction
     else if (line in dict) {
       instrToken = dict[line];
     } 
@@ -320,13 +363,11 @@ function processROP(lines) {
 
     payload.push(instrToken);
 
-    // === Handle data if this command expects it ===
+    // Handle data
     if (dataExpected > 0) {
       if (dataLine) {
-        // Single-line assignment
         dataLine = resolveAdrOf(dataLine, labels);
       } else {
-        // Gadget or classic pop - read next line for data
         i++;
         let nextRaw = (i < lines.length) ? lines[i].trim() : "";
 
@@ -335,9 +376,7 @@ function processROP(lines) {
           nextRaw = (i < lines.length) ? lines[i].trim() : "";
         }
 
-        if (!nextRaw) {
-          throw new Error(`Missing data after ${line}`);
-        }
+        if (!nextRaw) throw new Error(`Missing data after ${line}`);
 
         dataLine = nextRaw;
         i++;
@@ -345,8 +384,7 @@ function processROP(lines) {
 
       let resolvedData = resolveAdrOf(dataLine, labels);
       payload.push(...decodeData(resolvedData, labels, dataExpected));
-    } 
-    else {
+    } else {
       i++;
     }
   }
