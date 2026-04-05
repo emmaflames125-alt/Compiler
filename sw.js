@@ -1,12 +1,12 @@
 const CACHE_NAME = 'rop-compiler-v2';
 
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon-192.png',      // ← changed to match your manifest
-  '/icon-512.png',
-  '/maskable-512.png',
+  '/Compiler/',
+  '/Compiler/index.html',
+  '/Compiler/manifest.json',
+  '/Compiler/icon-192.png',
+  '/Compiler/icon-512.png',
+  '/Compiler/maskable-512.png',
   'https://cdn.tailwindcss.com',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css'
 ];
