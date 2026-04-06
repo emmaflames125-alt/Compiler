@@ -408,25 +408,28 @@ function processROP(lines) {
         let popMatch = lower.match(/pop (er|xr|qr)(\d+)/);
         if (popMatch) dataExpected = (popMatch[1] === "er") ? 2 : (popMatch[1] === "xr") ? 4 : 8;
       }
+      // === REGISTER SHORTHAND: erN=0x... / xrN=0x... / qrN=0x... ===
       else if (/^(er|xr|qr)\d+=/.test(raw)) {
         const match = raw.match(/^([exq]r)(\d+)=(.*)$/i);
         if (match) {
           const regType = match[1].toLowerCase();
+          const regNum  = match[2];                    // e.g. "2"
           const afterEquals = match[3].trim();
 
-          if (afterEquals.startsWith("0x")) {
-            const key = `pop_\( {regType} \){match[2]}`;
-            if (!dict[key]) throw new Error(`Unsupported register: \( {regType} \){match[2]}`);
-            instrToken = dict[key];
-            dataExpected = (regType === "er") ? 2 : (regType === "xr") ? 4 : 8;
-            dataLine = afterEquals;
-          } else if (raw in dict) {
-            instrToken = dict[raw];
-            let popMatch = lower.match(/pop (er|xr|qr)(\d+)/);
-            if (popMatch) dataExpected = (popMatch[1] === "er") ? 2 : (popMatch[1] === "xr") ? 4 : 8;
-          } else {
-            throw new Error(`Unknown instruction`);
+          // Build correct dict key
+          const key = `pop_\( {regType} \){regNum}`;
+
+          if (!(key in dict) || !dict[key]) {
+            throw new Error(
+              `Unsupported register: \( {regType} \){regNum}\n` +
+              `Supported: pop_er0, pop_er2, pop_er4, pop_er8, pop_er14, ` +
+              `pop_xr0, pop_xr4, pop_xr12, pop_qr0, pop_qr8`
+            );
           }
+
+          instrToken = dict[key];
+          dataExpected = (regType === "er") ? 2 : (regType === "xr") ? 4 : 8;
+          dataLine = afterEquals;   // will be decoded on the next step
         }
       }
       else if (lower.startsWith("pop_er") || lower.startsWith("pop_xr") || lower.startsWith("pop_qr")) {
